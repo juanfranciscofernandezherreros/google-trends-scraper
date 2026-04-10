@@ -1,4 +1,6 @@
 const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
 
 const urls = {
   uk: 'https://trends.google.com/trending?geo=GB&hl=en-GB&sort=search-volume&hours=24&&status=active',
@@ -219,13 +221,71 @@ const runExplore = async (geo, hl, query) => {
   }
 };
 
+const escapeCsvField = (field) => {
+  const str = String(field ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const writeExploreCsv = (result, outputDir) => {
+  const rows = [];
+  rows.push(['type', 'term', 'value', 'query', 'geo', 'hl', 'url', 'scrapedAt'].join(','));
+
+  for (const item of result.relatedTopics.top) {
+    rows.push([
+      'relatedTopic',
+      escapeCsvField(item.term),
+      escapeCsvField(item.value),
+      escapeCsvField(result.query),
+      escapeCsvField(result.geo),
+      escapeCsvField(result.hl),
+      escapeCsvField(result.url),
+      escapeCsvField(result.scrapedAt)
+    ].join(','));
+  }
+
+  for (const item of result.relatedQueries.top) {
+    rows.push([
+      'relatedQuery',
+      escapeCsvField(item.term),
+      escapeCsvField(item.value),
+      escapeCsvField(result.query),
+      escapeCsvField(result.geo),
+      escapeCsvField(result.hl),
+      escapeCsvField(result.url),
+      escapeCsvField(result.scrapedAt)
+    ].join(','));
+  }
+
+  const safeFilenameChars = /[^a-zA-Z0-9_-]/g;
+  const safeQuery = result.query.replace(safeFilenameChars, '_');
+  const safeGeo = result.geo.replace(safeFilenameChars, '_');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `explore_${safeGeo}_${safeQuery}_${timestamp}.csv`;
+  const filepath = path.join(outputDir, filename);
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(filepath, rows.join('\n'), 'utf8');
+  console.log(`CSV saved to: ${filepath}`);
+  return filepath;
+};
+
 const mode = process.argv[2];
 
 if (mode === 'explore') {
   const geo = process.argv[3] || 'ES';
   const hl = process.argv[4] || 'es-ES';
   const query = process.argv[5] || '/m/0dvkx';
-  runExplore(geo, hl, query);
+  runExplore(geo, hl, query).then(result => {
+    if (result) {
+      writeExploreCsv(result, 'output');
+    }
+  }).catch(err => {
+    console.error('Explore scrape failed:', err);
+    process.exit(1);
+  });
 } else {
   runAll(mode || 'uk');
 }

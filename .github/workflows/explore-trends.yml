@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       geo:
-        description: 'Geographic region code (e.g. ES, US, GB)'
+        description: 'Geographic region code (e.g. ES, US, GB, FR, DE, AR, BR)'
         required: false
         default: 'ES'
       hl:
-        description: 'Language/locale (e.g. es-ES, en-GB)'
+        description: 'Language/locale (e.g. es-ES, en-GB, en-US)'
         required: false
         default: 'es-ES'
       query:
@@ -34,3 +34,10 @@ jobs:
 
       - name: Run explore scraper
         run: node index.js explore "${{ github.event.inputs.geo }}" "${{ github.event.inputs.hl }}" "${{ github.event.inputs.query }}"
+
+      - name: Upload CSV results
+        uses: actions/upload-artifact@v4
+        with:
+          name: explore-trends-results
+          path: output/*.csv
+          if-no-files-found: warn
