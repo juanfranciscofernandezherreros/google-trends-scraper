@@ -8,6 +8,7 @@ const urls = {
   de: 'https://trends.google.com/trending?geo=DE&hl=en-GB&sort=search-volume&hours=24&status=active',
   ar: 'https://trends.google.com/trending?geo=AR&hl=en-GB&sort=search-volume&hours=24&status=active',
   br: 'https://trends.google.com/trending?geo=BR&hl=en-GB&sort=search-volume&hours=24&status=active',
+  baleares: 'https://trends.google.com/trending?geo=ES-IB&hl=es-ES&sort=search-volume&hours=24&status=active',
 };
 
 function getFormattedDate(date) {
@@ -133,10 +134,4 @@ const runAll = async (region) => {
   return newItems;
 }
 
-runAll('uk');
-// runAll('fr');
-// runAll('es');
-// runAll('de');
-// runAll('ar');
-// runAll('br');
-// runAll('us');
+runAll(process.argv[2] || 'uk');
