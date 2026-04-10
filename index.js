@@ -135,7 +135,11 @@ const runAll = async (region) => {
 
   const newItems = await run(urls[region], region);
   console.log('New items', newItems?.length);
-  console.log(newItems[0]);
+  if (newItems && newItems.length > 0) {
+    console.log(newItems[0]);
+  } else {
+    console.log('No items found');
+  }
   return newItems;
 }
 
@@ -277,8 +281,12 @@ const mode = process.argv[2];
 if (mode === 'explore') {
   const geo = process.argv[3] || 'ES';
   const hl = process.argv[4] || 'es-ES';
-  const query = process.argv[5] || '/m/0dvkx';
-  runExplore(geo, hl, query).then(result => {
+  const query = process.argv[5];
+  if (!query || !query.trim()) {
+    console.error('Error: a search query is required for explore mode. Usage: node index.js explore <geo> <hl> <query>');
+    process.exit(1);
+  }
+  runExplore(geo, hl, query.trim()).then(result => {
     if (result) {
       writeExploreCsv(result, 'output');
     }
