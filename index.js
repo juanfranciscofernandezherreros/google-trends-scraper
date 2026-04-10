@@ -4,7 +4,7 @@ const urls = {
   uk: 'https://trends.google.com/trending?geo=GB&hl=en-GB&sort=search-volume&hours=24&&status=active',
   us: 'https://trends.google.com/trending?geo=US&hl=en-US&sort=search-volume&hours=24&status=active',
   fr: 'https://trends.google.com/trending?geo=FR&hl=en-GB&sort=search-volume&hours=24&status=active',
-  es: 'https://trends.google.com/trending?geo=ES&hl=en-GB&sort=search-volume&hours=24&status=active',
+  es: 'https://trends.google.com/trending?geo=ES&hl=es-ES&hours=168&status=active&sort=search-volume',
   de: 'https://trends.google.com/trending?geo=DE&hl=en-GB&sort=search-volume&hours=24&status=active',
   ar: 'https://trends.google.com/trending?geo=AR&hl=en-GB&sort=search-volume&hours=24&status=active',
   br: 'https://trends.google.com/trending?geo=BR&hl=en-GB&sort=search-volume&hours=24&status=active',
