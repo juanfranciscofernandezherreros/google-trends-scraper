@@ -11,6 +11,9 @@ const urls = {
   baleares: 'https://trends.google.com/trending?geo=ES-IB&hl=es-ES&sort=search-volume&hours=24&status=active',
 };
 
+const buildExploreUrl = (geo, hl, query) =>
+  `https://trends.google.com/explore?geo=${encodeURIComponent(geo)}&hl=${encodeURIComponent(hl)}&q=${encodeURIComponent(query)}`;
+
 function getFormattedDate(date) {
   let year = date.getFullYear();
   let month = (1 + date.getMonth()).toString().padStart(2, '0');
@@ -134,4 +137,95 @@ const runAll = async (region) => {
   return newItems;
 }
 
-runAll(process.argv[2] || 'uk');
+const runExplore = async (geo, hl, query) => {
+  const url = buildExploreUrl(geo, hl, query);
+  console.log('Starting explore scrape...');
+  console.log('Navigating to:', url);
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: ['domcontentloaded', 'networkidle2'] });
+
+    await page.waitForFunction(
+      () => document.querySelectorAll('widget').length > 0,
+      { timeout: 30000 }
+    ).catch(() => console.log('Warning: widgets not found within timeout. Proceeding with extraction, but results may be incomplete.'));
+
+    const result = await page.evaluate((q, g, h, scrapedUrl) => {
+      const extractWidgetRows = (widgetTitle) => {
+        const widgets = Array.from(document.querySelectorAll('widget'));
+        const widget = widgets.find(w =>
+          (w.getAttribute('title') || '').toLowerCase().includes(widgetTitle.toLowerCase()) ||
+          (w.getAttribute('type') || '').toLowerCase().includes(widgetTitle.toLowerCase())
+        );
+        if (!widget) return { top: [], rising: [] };
+
+        const sections = { top: [], rising: [] };
+        const seenTerms = new Set();
+
+        const tables = widget.querySelectorAll('table');
+        tables.forEach(table => {
+          const rows = table.querySelectorAll('tbody tr');
+          rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 2) {
+              const term = cells[0]?.textContent?.trim();
+              const value = cells[1]?.textContent?.trim();
+              if (term && !seenTerms.has(term)) {
+                seenTerms.add(term);
+                sections.top.push({ term, value: value || '' });
+              }
+            }
+          });
+        });
+
+        const listItems = widget.querySelectorAll('li');
+        listItems.forEach(li => {
+          const termEl = li.querySelector('a, span');
+          const valueEl = li.querySelectorAll('span')[1];
+          const term = termEl?.textContent?.trim();
+          const value = valueEl?.textContent?.trim() || '';
+          if (term && !seenTerms.has(term)) {
+            seenTerms.add(term);
+            sections.top.push({ term, value });
+          }
+        });
+
+        return sections;
+      };
+
+      return {
+        query: q,
+        geo: g,
+        hl: h,
+        url: scrapedUrl,
+        relatedTopics: extractWidgetRows('related_topics'),
+        relatedQueries: extractWidgetRows('related_searches'),
+        scrapedAt: new Date().toISOString()
+      };
+    }, query, geo, hl, url);
+
+    console.log('Related topics found:', result.relatedTopics.top.length);
+    console.log('Related queries found:', result.relatedQueries.top.length);
+    console.log(result);
+    return result;
+  } finally {
+    await browser.close();
+  }
+};
+
+const mode = process.argv[2];
+
+if (mode === 'explore') {
+  const geo = process.argv[3] || 'ES';
+  const hl = process.argv[4] || 'es-ES';
+  const query = process.argv[5] || '/m/0dvkx';
+  runExplore(geo, hl, query);
+} else {
+  runAll(mode || 'uk');
+}
