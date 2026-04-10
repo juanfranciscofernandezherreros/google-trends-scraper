@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const urls = {
-  uk: 'https://trends.google.com/trending?geo=GB&hl=en-GB&sort=search-volume&hours=24&&status=active',
+  uk: 'https://trends.google.com/trending?geo=GB&hl=en-GB&sort=search-volume&hours=24&status=active',
   us: 'https://trends.google.com/trending?geo=US&hl=en-US&sort=search-volume&hours=24&status=active',
   fr: 'https://trends.google.com/trending?geo=FR&hl=en-GB&sort=search-volume&hours=24&status=active',
   es: 'https://trends.google.com/trending?geo=ES&hl=en-GB&sort=search-volume&hours=24&status=active',
@@ -13,8 +13,9 @@ const urls = {
   baleares: 'https://trends.google.com/trending?geo=ES-IB&hl=es-ES&sort=search-volume&hours=24&status=active',
 };
 
+// Bug fix: use /trends/explore (correct path) instead of /explore
 const buildExploreUrl = (geo, hl, query) =>
-  `https://trends.google.com/explore?geo=${encodeURIComponent(geo)}&hl=${encodeURIComponent(hl)}&q=${encodeURIComponent(query)}`;
+  `https://trends.google.com/trends/explore?geo=${encodeURIComponent(geo)}&hl=${encodeURIComponent(hl)}&q=${encodeURIComponent(query)}`;
 
 function getFormattedDate(date) {
   let year = date.getFullYear();
@@ -33,97 +34,101 @@ const run = async (url, region) => {
   const page = await browser.newPage();
   
   console.log('Navigating to:', url);
-  await page.goto(url, { waitUntil: ['domcontentloaded','networkidle2'] });
-  await page.waitForSelector("table > tbody[class=''] > tr");
-  
-  const newsItems = await page.$$("table > tbody[class=''] > tr");
+  await page.goto(url, { waitUntil: ['domcontentloaded', 'networkidle2'] });
+
+  // Bug fix: tbody[class=''] only matches <tbody class="">, not <tbody> with no class attribute.
+  // Use the plain tbody selector so rows are always found.
+  const rowSelector = "table > tbody > tr";
+  const rowsFound = await page.waitForSelector(rowSelector, { timeout: 30000 }).catch(() => null);
+  if (!rowsFound) {
+    console.log('Warning: table rows not found within timeout. Page may not have loaded correctly.');
+    await browser.close();
+    return itemsExtracted;
+  }
+
+  const newsItems = await page.$$(rowSelector);
   console.log(`Found ${newsItems.length} news items`);
   
-  let trendingTerms = [];
-  let term = null;
   for (let i = 0; i < newsItems.length; i++) {
-    trendingTerms = [];
-    term = null;
-
     const newsItem = newsItems[i];
     if (!newsItem) {
       console.log('News item not found');
       continue;
     }
-    
-    await newsItem.click();
 
     const titleElement = await newsItem.$("td:nth-child(2) > div:first-child");
     const searchTrafficEl = await newsItem.$("td:nth-child(3) > div:first-child > div:first-child");
     const searchVolume = searchTrafficEl ? await searchTrafficEl.evaluate(el => el.textContent.trim()) : '';
     const title = titleElement ? await titleElement.evaluate(el => el.textContent.trim()) : '';
 
-    const allDivs = await page.$$('div');
-    const trendHeaderDivs = [];
-    for (const div of allDivs) {
-      const textContent = await div.evaluate(el => el.textContent);
-      if (textContent.includes('Trend breakdown')) {
-        trendHeaderDivs.push(div);
-      }
-    }
-    const trendHeaderDiv = trendHeaderDivs.length > 0 ? trendHeaderDivs[0] : null;
-
-    if (!trendHeaderDiv) {
-      console.log('Trend breakdown div not found');
+    if (!title) {
+      console.log(`Row ${i}: no title found, skipping`);
       continue;
     }
 
-    const divs = await page.$$('div[jsaction][jscontroller] > div[class] > div[class] > div > div[jsaction][jscontroller]');
+    await newsItem.click();
+    // Wait for the expansion panel to render instead of searching for language-specific text.
+    // Bug fix: the old code searched for "Trend breakdown" (English only), causing ALL rows
+    // to be skipped when the page language is not English (e.g. baleares uses hl=es-ES).
+    // Use a language-agnostic structural selector; fall back to a fixed wait if not found.
+    const trendTermsSelector =
+      'div[jsaction][jscontroller] > div[class] > div[class] > div > div[jsaction][jscontroller]';
+    await page.waitForSelector(trendTermsSelector, { timeout: 3000 }).catch(() => page.waitForTimeout(600));
 
-    for (const div of divs) {
-       term = await div.evaluate(divEl => {
+    // Extract trending terms using page.evaluate() — much faster than iterating
+    // Puppeteer element handles one by one (avoids thousands of round-trips).
+    const trendingTerms = await page.evaluate((selector) => {
+      const terms = [];
+      const divs = document.querySelectorAll(selector);
+      divs.forEach(divEl => {
         const wrapper = divEl.querySelector('span[data-is-tooltip-wrapper]');
-        if (!wrapper) return null;
-
+        if (!wrapper) return;
         const button = wrapper.querySelector('button');
-        if (!button) return null;
-
+        if (!button) return;
         const spans = button.querySelectorAll('span');
         if (spans.length >= 4) {
-          return spans[3].textContent.trim();
+          const text = spans[3].textContent.trim();
+          if (text) terms.push(text);
         }
-
-        return null;
       });
-
-      if (term) trendingTerms.push(term);
-    }
-
+      return terms;
+    }, trendTermsSelector);
 
     const links = await page.evaluate(() => {
       const linksReferenced = [];
-      const divs = document.querySelectorAll('div[jsaction][jscontroller] > div > div:nth-child(2) > div[jsaction]');
-    
+      const divs = document.querySelectorAll(
+        'div[jsaction][jscontroller] > div > div:nth-child(2) > div[jsaction]'
+      );
       divs.forEach(div => {
         const link = div.querySelector('a[target="_blank"]');
         if (link) {
           linksReferenced.push(link.href.split('?')[0]);
         }
       });
-
       return linksReferenced;
     });
 
-    const newItem = {
+    itemsExtracted.push({
       updatedAt: new Date().toISOString(),
       searchBy: title,
       links,
       searchVolume,
       country: region,
       createdAt: getFormattedDate(new Date()),
-      trendingTerms: trendingTerms.filter(term => term)
-    }
-
-    itemsExtracted.push(newItem);
+      trendingTerms,
+    });
   }
 
   await browser.close();
   return itemsExtracted;
+};
+
+const escapeCsvField = (field) => {
+  const str = String(field ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 };
 
 const filterByKeyword = (items, keyword) => {
@@ -136,9 +141,36 @@ const filterByKeyword = (items, keyword) => {
   });
 };
 
+const writeTrendingCsv = (items, region, outputDir) => {
+  const rows = [];
+  rows.push(['rank', 'searchBy', 'searchVolume', 'trendingTerms', 'links', 'country', 'createdAt', 'updatedAt'].join(','));
+
+  items.forEach((item, index) => {
+    rows.push([
+      index + 1,
+      escapeCsvField(item.searchBy),
+      escapeCsvField(item.searchVolume),
+      escapeCsvField((item.trendingTerms || []).join(' | ')),
+      escapeCsvField((item.links || []).join(' | ')),
+      escapeCsvField(item.country),
+      escapeCsvField(item.createdAt),
+      escapeCsvField(item.updatedAt),
+    ].join(','));
+  });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `trending_${region}_${timestamp}.csv`;
+  const filepath = path.join(outputDir, filename);
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(filepath, rows.join('\n'), 'utf8');
+  console.log(`CSV saved to: ${filepath}`);
+  return filepath;
+};
+
 const runAll = async (region, keyword) => {
   console.log('Starting...');
-  if(!urls[region]) {
+  if (!urls[region]) {
     console.log('Region not found', region);
     process.exit(0);
   }
@@ -154,6 +186,7 @@ const runAll = async (region, keyword) => {
 
   if (filteredItems && filteredItems.length > 0) {
     console.log(filteredItems[0]);
+    writeTrendingCsv(filteredItems, region, 'output');
   } else {
     console.log('No items found');
   }
@@ -191,6 +224,7 @@ const runExplore = async (geo, hl, query) => {
         const sections = { top: [], rising: [] };
         const seenTerms = new Set();
 
+        // Strategy 1: table rows
         const tables = widget.querySelectorAll('table');
         tables.forEach(table => {
           const rows = table.querySelectorAll('tbody tr');
@@ -207,10 +241,24 @@ const runExplore = async (geo, hl, query) => {
           });
         });
 
+        // Strategy 2: list items
         const listItems = widget.querySelectorAll('li');
         listItems.forEach(li => {
           const termEl = li.querySelector('a, span');
           const valueEl = li.querySelectorAll('span')[1];
+          const term = termEl?.textContent?.trim();
+          const value = valueEl?.textContent?.trim() || '';
+          if (term && !seenTerms.has(term)) {
+            seenTerms.add(term);
+            sections.top.push({ term, value });
+          }
+        });
+
+        // Strategy 3: feed-list-item / .label + .value pattern (Angular widget internals)
+        const feedItems = widget.querySelectorAll('feed-list-item, .feed-list-item');
+        feedItems.forEach(fi => {
+          const termEl = fi.querySelector('.label a, .label span, a');
+          const valueEl = fi.querySelector('.value span, .value');
           const term = termEl?.textContent?.trim();
           const value = valueEl?.textContent?.trim() || '';
           if (term && !seenTerms.has(term)) {
@@ -228,7 +276,8 @@ const runExplore = async (geo, hl, query) => {
         hl: h,
         url: scrapedUrl,
         relatedTopics: extractWidgetRows('related_topics'),
-        relatedQueries: extractWidgetRows('related_searches'),
+        // Bug fix: was 'related_searches' which never matched the widget type 'fe_related_queries'
+        relatedQueries: extractWidgetRows('related_queries'),
         scrapedAt: new Date().toISOString()
       };
     }, query, geo, hl, url);
@@ -240,14 +289,6 @@ const runExplore = async (geo, hl, query) => {
   } finally {
     await browser.close();
   }
-};
-
-const escapeCsvField = (field) => {
-  const str = String(field ?? '');
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
 };
 
 const writeExploreCsv = (result, outputDir) => {
