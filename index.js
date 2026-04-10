@@ -126,7 +126,17 @@ const run = async (url, region) => {
   return itemsExtracted;
 };
 
-const runAll = async (region) => {
+const filterByKeyword = (items, keyword) => {
+  if (!keyword || !keyword.trim()) return items;
+  const kw = keyword.trim().toLowerCase();
+  return items.filter(item => {
+    const inTitle = item.searchBy && item.searchBy.toLowerCase().includes(kw);
+    const inTerms = item.trendingTerms && item.trendingTerms.some(t => t.toLowerCase().includes(kw));
+    return inTitle || inTerms;
+  });
+};
+
+const runAll = async (region, keyword) => {
   console.log('Starting...');
   if(!urls[region]) {
     console.log('Region not found', region);
@@ -134,13 +144,20 @@ const runAll = async (region) => {
   }
 
   const newItems = await run(urls[region], region);
-  console.log('New items', newItems?.length);
-  if (newItems && newItems.length > 0) {
-    console.log(newItems[0]);
+  const filteredItems = filterByKeyword(newItems, keyword);
+
+  if (keyword) {
+    console.log(`Filter: "${keyword}" — ${filteredItems.length} of ${newItems?.length} items match`);
+  } else {
+    console.log('New items', newItems?.length);
+  }
+
+  if (filteredItems && filteredItems.length > 0) {
+    console.log(filteredItems[0]);
   } else {
     console.log('No items found');
   }
-  return newItems;
+  return filteredItems;
 }
 
 const runExplore = async (geo, hl, query) => {
@@ -295,5 +312,6 @@ if (mode === 'explore') {
     process.exit(1);
   });
 } else {
-  runAll(mode || 'uk');
+  const keyword = process.argv[3];
+  runAll(mode || 'uk', keyword);
 }

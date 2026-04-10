@@ -38,16 +38,19 @@ The scraper can be run for different regions. By default, it's configured to run
 
 1. **Run the trending scraper**:
 ```bash
-node index.js [region]
+node index.js [region] [keyword]
 ```
 
 Available regions: `uk`, `us`, `fr`, `es`, `de`, `ar`, `br`, `baleares`.
 
 ```bash
-node index.js uk        # United Kingdom (default)
-node index.js es        # Spain
+node index.js uk        # United Kingdom (default), all trends
+node index.js es        # Spain, all trends
+node index.js es futbol # Spain, only trends matching "futbol"
 node index.js baleares  # Islas Baleares
 ```
+
+The optional `keyword` parameter filters results so only trends whose title or trending terms contain the keyword (case-insensitive) are returned. All other trends are discarded.
 
 ### Running the Explore Scraper
 
